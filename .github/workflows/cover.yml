@@ -59,7 +59,9 @@ jobs:
       R2_PUBLIC_BASE: ${{ secrets.R2_PUBLIC_BASE }}
       R2_CKPT_KEY: ${{ secrets.R2_CKPT_KEY || 'models/seedvc/seedvc_ckpt.tar.xz' }}
       HF_ENDPOINT: https://huggingface.co
-      OMP_NUM_THREADS: 4
+      OMP_NUM_THREADS: 2
+      MKL_NUM_THREADS: 2
+      TORCH_NUM_THREADS: 2
       YT_COOKIES_FILE: ${{ github.workspace }}/yt_cookies.txt
       WORK: ${{ github.workspace }}/work
     steps:

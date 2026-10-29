@@ -184,3 +184,47 @@ cover-cloud/
 | 适合 | 精修、试参、A/B | 挂机批量入库 |
 
 两条线共用同一份 Seed-VC 权重与推理参数，产出物 manifest 结构一致，可以混着往 R2 里加。
+
+---
+
+## 七、素材怎么投（不用复制粘贴链接）
+
+清单文件：`E:\小鱼歌曲翻唱文件夹原版音乐\素材清单.txt`
+
+一行一首，竖线分隔（后三段可空/写 `-`）：
+
+```
+歌名 | 原唱链接(含人声) | 伴奏链接(纯伴奏) | 清唱链接(纯人声) | 备注
+```
+
+改完跟 DSH 说「按素材清单批量跑」，执行的是：
+
+```bash
+cd /d/DSHgongzuoqualiyun/cloud/cover-cloud
+python tools/run_from_sheet.py            # 解析 → 传 R2 inbox → gh workflow run
+python tools/run_from_sheet.py --dry-run  # 只看解析结果
+```
+
+规则：有清唱+伴奏 → 跳过 AI 分离；有原唱+伴奏 → 只分离人声；只有原唱 → 全 AI 分离。
+
+## 八、YouTube 下载（重要）
+
+2026 年起 YouTube 对**所有机房 IP + 无 cookie 请求**一律返回 `Sign in to confirm you're not a bot`，
+本机（家宽）、GitHub runner、PO token provider 三种情况都实测拦。可靠解法只有一个：**带你自己的 cookies**。
+
+导出一次（Chrome 装扩展 `Get cookies.txt LOCALLY` → 打开 youtube.com → 导出 → 存成 cookies.txt），然后：
+
+```bash
+# A. 本机/云打通吃（推荐，一次搞定）
+gh secret set YT_COOKIES_B64 -R 493764654/cover-cloud < <(base64 -w0 cookies.txt)
+# workflow 会自动落盘成 yt_cookies.txt 并传给 yt-dlp
+```
+
+`scripts/extract.py` 与 `pipeline.py` 已读 `YT_COOKIES_FILE` 环境变量，没配 cookies 时自动退回无 cookie 模式（会失败但不影响别的歌）。
+
+> Chrome v127+ 的 App-Bound 加密让 `--cookies-from-browser chrome` 解不了（DPAPI 报错），必须用扩展导出的 cookies.txt。
+
+## 九、私有仓库只有 2 核
+
+`ubuntu-latest` 在**私有仓库是 2 vCPU**（公开仓库才 4 核）。实测 20 秒片段在 2 核上要 20 分钟以上，整曲会撞 350 分钟上限。
+对策：批量跑用 `-f seconds=90` 只做副歌段，或把这个仓库转成 public（代码没密钥，密钥都在 Secrets 里）。
