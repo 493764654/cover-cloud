@@ -1,0 +1,153 @@
+name: cover
+
+# 云端翻唱流水线（ubuntu-latest 4vCPU / 16G / 无 GPU，单首约 20–45 分钟）
+# 触发：Actions 页面 → Run workflow，或 gh workflow run cover -f mode=cover -f targets=all
+# 产物：直传 R2 songs/<sid>/ + 根 manifest.json（variants.normal / variants.acapella）
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "cover=翻唱流水线 / extract=只下载转 wav 并传 R2 inbox/"
+        required: true
+        default: cover
+        type: choice
+        options: [cover, extract]
+      targets:
+        description: "cover: R2 inbox 文件名(逗号分隔) 或 all 或视频URL；extract: 视频URL(逗号分隔)"
+        required: true
+        default: all
+      title:
+        description: "曲名（仅单曲时生效，留空用文件名）"
+        required: false
+        default: ""
+      sid:
+        description: "song_id（仅单曲时生效，留空自动递增）"
+        required: false
+        default: ""
+      seconds:
+        description: "只处理前 N 秒（0=整曲，冒烟用 20）"
+        required: false
+        default: "0"
+      steps:
+        description: "扩散步数（25 平衡 / 20 更快 / 30 更好）"
+        required: false
+        default: "25"
+      seg:
+        description: "换声分段长度秒（24 默认，防长曲掉音）"
+        required: false
+        default: "24"
+
+concurrency:
+  group: cover-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    env:
+      R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
+      R2_BUCKET: ${{ secrets.R2_BUCKET }}
+      R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+      R2_REGION: auto
+      R2_PUBLIC_BASE: ${{ secrets.R2_PUBLIC_BASE }}
+      R2_CKPT_KEY: ${{ secrets.R2_CKPT_KEY || 'models/seedvc/seedvc_ckpt.tar.xz' }}
+      HF_ENDPOINT: https://huggingface.co
+      OMP_NUM_THREADS: 4
+      WORK: ${{ github.workspace }}/work
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - name: 系统依赖
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ffmpeg libsndfile1
+          ffmpeg -version | head -1
+
+      - name: 安装依赖（CPU 版 torch）
+        run: |
+          python -m pip install -q --upgrade pip
+          pip install -q --index-url https://download.pytorch.org/whl/cpu torch==2.4.0 torchaudio==2.4.0
+          pip install -q -r requirements.txt
+          python -c "import torch, demucs; print('torch', torch.__version__, 'cuda', torch.cuda.is_available())"
+
+      - name: 恢复 Seed-VC 权重缓存
+        id: ckptcache
+        uses: actions/cache@v4
+        with:
+          path: vendor/seedvc/ckpt
+          key: seedvc-ckpt-v1
+
+      - name: 从 R2 拉 Seed-VC 权重（约 2.4GB，仅首次）
+        if: steps.ckptcache.outputs.cache-hit != 'true'
+        run: |
+          python -c "import sys;sys.path.insert(0,'scripts');from common import r2_get;r2_get(__import__('os').environ['R2_CKPT_KEY'],'/tmp/ckpt.tar.xz')"
+          mkdir -p vendor/seedvc/ckpt
+          tar -xJf /tmp/ckpt.tar.xz -C vendor/seedvc
+          du -sh vendor/seedvc/ckpt && ls vendor/seedvc/ckpt
+
+      - name: extract 模式（URL → R2 inbox）
+        if: inputs.mode == 'extract'
+        run: |
+          set -uo pipefail
+          mkdir -p work
+          i=0
+          IFS=',' read -ra ITEMS <<< "${{ inputs.targets }}"
+          for it in "${ITEMS[@]}"; do
+            it="$(echo "$it" | xargs)"
+            [ -z "$it" ] && continue
+            i=$((i+1))
+            python scripts/extract.py --url "$it" --name "dl_${i}" || exit 1
+          done
+
+      - name: cover 模式（翻唱 → R2）
+        if: inputs.mode == 'cover'
+        run: |
+          set -uo pipefail
+          mkdir -p work
+          RAW="${{ inputs.targets }}"
+          if [ "$RAW" = "all" ]; then
+            python -c "import sys;sys.path.insert(0,'scripts');from common import r2_list;print('\n'.join(k for k in r2_list('inbox/') if k.lower().endswith(('.mp3','.wav','.flac','.m4a'))))" > work/list.txt
+          else
+            printf '%s\n' "$RAW" | tr ',' '\n' | sed 's/^ *//;s/ *$//' | grep -v '^$' > work/list.txt
+          fi
+          mapfile -t LIST < work/list.txt
+          echo "共 ${#LIST[@]} 首"
+          ok=0; fail=0
+          for item in "${LIST[@]}"; do
+            case "$item" in
+              http*) SRC="url:$item" ;;
+              r2:*)  SRC="$item" ;;
+              *)     SRC="r2:$item" ;;
+            esac
+            echo "=== $SRC"
+            if python scripts/pipeline.py --source "$SRC" \
+                 --sid "${{ inputs.sid }}" --title "${{ inputs.title }}" \
+                 --seconds "${{ inputs.seconds }}" --steps "${{ inputs.steps }}" \
+                 --seg "${{ inputs.seg }}"; then
+              ok=$((ok+1))
+            else
+              fail=$((fail+1)); echo "FAILED: $SRC"
+            fi
+          done
+          echo "成功 $ok / 失败 $fail"
+          [ "$fail" -eq 0 ]
+
+      - name: 上传日志
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: run-log
+          path: |
+            work/**/*.json
+            work/**/*.log
+          retention-days: 7
+          if-no-files-found: ignore

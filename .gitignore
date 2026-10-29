@@ -1,0 +1,12 @@
+# 权重与中间产物不进仓库
+vendor/seedvc/ckpt/
+vendor/seedvc/checkpoints/
+vendor/seedvc/runs/
+vendor/seedvc/**.pth
+work/
+*.wav
+*.mp3
+*.tar.xz
+__pycache__/
+*.pyc
+.env
