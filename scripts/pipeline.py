@@ -145,6 +145,8 @@ def vc_seedvc(vocals: str, ref: str, wd: str, seg: float = 24.0, overlap: float 
     x, sr = _read_wav(vocals)
     total = len(x) / sr
     tmp = os.path.join(out_dir, "_seg")
+    if os.path.isdir(tmp):   # 重跑时清掉旧分片，避免 inference 写已存在的输出目录而失败
+        shutil.rmtree(tmp, ignore_errors=True)
     os.makedirs(tmp, exist_ok=True)
     pos, pieces, i = 0.0, [], 0
     while pos < total:
@@ -339,6 +341,10 @@ def run_one(source: str, sid: str, title: str, ref: str, work: str, seconds: flo
     r2_put(acap, keys["acapella"])
     urls = [f"{base}/{keys[k]}" if base else "" for k in ("cover", "plain")]
     acap_url = f"{base}/{keys['acapella']}" if base else None
+    try:
+        r2_put(os.path.join(wd, "_info.json"), f"songs/{sid}/_info.json")
+    except Exception as _e:  # noqa: BLE001
+        log("info", f"上传 _info.json 失败 {_e}")
     upsert_manifest(sid, title, [u for u in urls if u] or urls, acap_url, info, loud, keys["cover"])
     result["uploaded"] = True
     log("done", f"{sid} -> {base}/{keys['cover']}")
