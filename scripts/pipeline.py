@@ -37,26 +37,37 @@ from common import (ff, log, loudnorm_two_pass, measure_loudness, next_id, probe
 
 
 # ------------------------------------------------------------------ 取源
-def fetch_source(src: str, wd: str) -> str:
-    """r2:key / url:http... / 本地路径 → 统一返回源文件路径。"""
+def fetch_source(src: str, wd: str, tag: str = "src") -> str:
+    """r2:key / url:http... / 本地路径 → 统一返回本地文件路径。tag 用于区分同曲多轨。"""
+    if not src or src == "-":
+        return ""
     if src.startswith("r2:"):
-        return r2_get(src[3:], os.path.join(wd, "src_raw" + os.path.splitext(src[3:])[1]))
+        ext = os.path.splitext(src[3:])[1] or ".wav"
+        return r2_get(src[3:], os.path.join(wd, f"{tag}_raw{ext}"))
     if src.startswith("url:"):
         url = src[4:]
-        out = os.path.join(wd, "src_raw.%(ext)s")
+        out = os.path.join(wd, tag + "_raw.%(ext)s")
         cmd = [sys.executable, "-m", "yt_dlp", "-x", "--audio-format", "wav",
-               "--audio-quality", "0", "-o", out, url]
-        log("download", url)
-        p = subprocess.run(cmd, capture_output=True, text=True)
+               "--audio-quality", "0", "--no-playlist", "-o", out, url]
+        log("download", f"[{tag}] {url}")
+        p = subprocess.run(cmd, capture_output=True, text=True,
+                           encoding="utf-8", errors="replace")
         if p.returncode != 0:
-            raise RuntimeError("yt-dlp 失败:\n" + (p.stderr or "")[-1200:])
-        hits = sorted(glob.glob(os.path.join(wd, "src_raw.*")))
+            raise RuntimeError(f"yt-dlp 失败 [{tag}]:\n" + (p.stderr or "")[-1200:])
+        hits = sorted(glob.glob(os.path.join(wd, tag + "_raw.*")))
         if not hits:
             raise RuntimeError("下载成功但找不到文件")
         return hits[0]
     if not os.path.exists(src):
         raise FileNotFoundError(src)
     return src
+
+
+def to_wav(src: str, dst: str, seconds: float = 0) -> str:
+    """统一 44.1k / 立体声 / s16。"""
+    ff(*(["-t", str(seconds)] if seconds else []), "-i", src, "-vn", "-ac", "2",
+       "-ar", "44100", "-c:a", "pcm_s16le", dst)
+    return dst
 
 
 # ------------------------------------------------------------------ 分离
@@ -67,9 +78,7 @@ def separate(src: str, wd: str, seconds: float = 0, demucs_seg: float = 7) -> tu
     from demucs.apply import apply_model
     from demucs.pretrained import get_model
 
-    src44 = os.path.join(wd, "src44.wav")
-    trim = ["-t", str(seconds)] if seconds else []
-    ff(*trim, "-i", src, "-vn", "-ac", "2", "-ar", "44100", "-c:a", "pcm_s16le", src44)
+    src44 = to_wav(src, os.path.join(wd, "src44.wav"), seconds)
 
     dev = "cuda" if torch.cuda.is_available() else "cpu"
     model = get_model("htdemucs")
@@ -222,18 +231,37 @@ def export_acapella(vc: str, wd: str) -> str:
 
 # ------------------------------------------------------------------ 主流程
 def run_one(source: str, sid: str, title: str, ref: str, work: str, seconds: float,
-            steps: int, seg: float, no_upload: bool, reuse: bool = False) -> dict:
+            steps: int, seg: float, no_upload: bool, reuse: bool = False,
+            inst_src: str = "", acap_src: str = "") -> dict:
+    """source=原唱(含人声) / inst_src=纯伴奏 / acap_src=纯人声清唱，后两者可空。
+
+    优先级：清唱 > 原唱分离；伴奏：给的优先，否则用分离出来的。
+    """
     wd = os.path.join(work, sid)
     os.makedirs(wd, exist_ok=True)
-    log("start", f"{sid} ← {source[:90]}")
+    log("start", f"{sid} ← {source or '(无原唱)'} | inst={bool(inst_src)} acap={bool(acap_src)}")
 
     vp, ip = os.path.join(wd, "vocals.wav"), os.path.join(wd, "instrumental.wav")
     if reuse and os.path.exists(vp) and os.path.exists(ip):
         vocals, inst = vp, ip
         log("separate", "复用已有 stems（--reuse）")
     else:
-        src = fetch_source(source, wd)
-        vocals, inst = separate(src, wd, seconds=seconds)
+        inst_given = fetch_source(inst_src, wd, tag="inst")
+        acap_given = fetch_source(acap_src, wd, tag="acap")
+        if acap_given:
+            vocals = to_wav(acap_given, vp, seconds)
+            log("vocal", f"用官方清唱 {acap_given}")
+            inst = to_wav(inst_given, ip, seconds) if inst_given else ""
+        elif source and source != "-":
+            src = fetch_source(source, wd, tag="src")
+            vocals, sep_inst = separate(src, wd, seconds=seconds)
+            inst = to_wav(inst_given, ip, seconds) if inst_given else sep_inst
+            if inst_given:
+                log("inst", f"伴奏用你给的官方版 {inst_given}")
+        else:
+            raise SystemExit("既没有原唱也没有清唱，无法换声")
+        if not inst or not os.path.exists(inst):
+            raise SystemExit("缺伴奏轨：给 --inst 或给原唱走分离")
 
     cached_vc = os.path.join(wd, "vc", "vc_full.wav")
     if reuse and os.path.exists(cached_vc):
@@ -268,7 +296,9 @@ def run_one(source: str, sid: str, title: str, ref: str, work: str, seconds: flo
 
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--source", required=True, help="r2:key | url:http... | 本地路径")
+    ap.add_argument("--source", default="", help="原唱（含人声）：r2:key | url:http... | 本地路径")
+    ap.add_argument("--inst", default="", help="纯伴奏（可选）：给了就跳过 AI 伴奏")
+    ap.add_argument("--acapella", dest="acap", default="", help="纯人声清唱（可选）：给了就跳过 AI 分离")
     ap.add_argument("--sid", default="", help="song_id，缺省自动取下一个 sXXX")
     ap.add_argument("--title", default="")
     ap.add_argument("--ref", default="", help="参考音色音频；缺省从 R2 assets/ref/cover_voice.mp3 取")
@@ -296,10 +326,10 @@ def main() -> None:
     if not sid:
         from common import load_manifest
         sid = next_id(load_manifest().get("songs", []))
-    title = a.title or os.path.splitext(os.path.basename(a.source.replace("r2:", "")))[0]
+    title = a.title or os.path.splitext(os.path.basename((a.source or a.acap).replace("r2:", "")))[0]
 
     res = run_one(a.source, sid, title, ref, a.work, a.seconds, a.steps, a.seg, a.no_upload,
-                  reuse=a.reuse)
+                  reuse=a.reuse, inst_src=a.inst, acap_src=a.acap)
     print("RESULT " + str(res), flush=True)
 
 

@@ -95,6 +95,21 @@ jobs:
           tar -xJf /tmp/ckpt.tar.xz -C vendor/seedvc
           du -sh vendor/seedvc/ckpt && ls vendor/seedvc/ckpt
 
+      - name: 启动 YouTube PO token provider（绕 bot 校验）
+        run: |
+          docker run -d --name bgutil-pot -p 4416:4416 brainicism/bgutil-ytdlp-pot-provider:latest || true
+          for i in $(seq 1 30); do
+            if curl -sf http://127.0.0.1:4416/ping >/dev/null; then echo "pot ready"; break; fi
+            sleep 2
+          done
+          curl -s http://127.0.0.1:4416/ping || echo "WARN: provider 未就绪，YouTube 可能撞 bot"
+
+      - name: 安装 deno（yt-dlp 的 nsig JS runtime）
+        run: |
+          curl -fsSL https://deno.land/install.sh | sh -s -- -y || true
+          echo "$HOME/.deno/bin" >> "$GITHUB_PATH"
+          "$HOME/.deno/bin/deno" --version 2>/dev/null || echo "WARN: deno 未装成功"
+
       - name: extract 模式（URL → R2 inbox）
         if: inputs.mode == 'extract'
         run: |
