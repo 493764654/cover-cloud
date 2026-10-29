@@ -135,6 +135,8 @@ jobs:
         run: |
           set -uo pipefail
           mkdir -p work
+          echo "=== R2 诊断 ==="
+          python -c "import sys,os;sys.path.insert(0,'scripts');from common import r2_list;s3l=r2_list('inbox/');print('ENDPOINT',(os.environ.get('R2_ENDPOINT') or '')[:32]);print('BUCKET',repr(os.environ.get('R2_BUCKET')));print('INBOX',s3l[:10])"
           if [ -n "${PLAN:-}" ]; then
             python -c "import os,io;io.open('work/plan.json','w',encoding='utf-8').write(os.environ['PLAN'])"
             echo "plan 条数: $(python -c "import json;print(len(json.load(open('work/plan.json',encoding='utf-8'))))")"

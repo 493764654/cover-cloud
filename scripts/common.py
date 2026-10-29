@@ -99,7 +99,10 @@ def r2():
 def r2_get(key: str, dst: str) -> str:
     s3, bucket = r2()
     os.makedirs(os.path.dirname(dst) or ".", exist_ok=True)
-    s3.download_file(bucket, key, dst)
+    try:
+        s3.download_file(bucket, key, dst)
+    except Exception as e:  # noqa: BLE001
+        raise RuntimeError(f"R2 读取失败 bucket={bucket} key={key!r}: {type(e).__name__}: {e}") from e
     log("r2", f"GET {key} -> {os.path.getsize(dst) / 1048576:.2f}MB")
     return dst
 
