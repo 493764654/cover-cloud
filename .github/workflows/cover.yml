@@ -43,7 +43,7 @@ on:
         default: "24"
 
 concurrency:
-  group: cover-${{ github.ref }}
+  group: cover-${{ github.ref }}-${{ github.run_id }}
   cancel-in-progress: false
 
 jobs:

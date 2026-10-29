@@ -137,7 +137,7 @@ def _write_wav(path: str, x: np.ndarray, sr: int) -> None:
 
 
 def vc_seedvc(vocals: str, ref: str, wd: str, seg: float = 24.0, overlap: float = 1.0,
-              steps: int = 25, cfg: float = 0.7, fp16: str = "False") -> str:
+              steps: int = 25, cfg: float = 0.7, fp16: str = "False", semi: int = 0) -> str:
     """分段换声 + 交叉淡化拼接 → vc_full.wav（干声）。"""
     out_dir = os.path.join(wd, "vc")
     os.makedirs(out_dir, exist_ok=True)
@@ -157,7 +157,7 @@ def vc_seedvc(vocals: str, ref: str, wd: str, seg: float = 24.0, overlap: float 
         cmd = [sys.executable, "inference.py", "--source", seg_wav, "--target", ref,
                "--output", out, "--diffusion-steps", str(steps), "--length-adjust", "1.0",
                "--inference-cfg-rate", str(cfg), "--f0-condition", "True",
-               "--auto-f0-adjust", "False", "--semi-tone-shift", "0",
+               "--auto-f0-adjust", "False", "--semi-tone-shift", str(semi),
                "--checkpoint", "ckpt/DiT_v2.pth", "--config", "configs/presets/config_local.yml",
                "--fp16", fp16]
         log("vc", f"seg{i:02d} 开始 {pos:.1f}..{pos + dur:.1f}s steps={steps}")
@@ -256,11 +256,18 @@ def export_acapella(vc: str, wd: str) -> str:
 # ------------------------------------------------------------------ 主流程
 def run_one(source: str, sid: str, title: str, ref: str, work: str, seconds: float,
             steps: int, seg: float, no_upload: bool, reuse: bool = False,
-            inst_src: str = "", acap_src: str = "") -> dict:
+            inst_src: str = "", acap_src: str = "", fp16: str = "auto",
+            semi: int = 0) -> dict:
     """source=原唱(含人声) / inst_src=纯伴奏 / acap_src=纯人声清唱，后两者可空。
 
     优先级：清唱 > 原唱分离；伴奏：给的优先，否则用分离出来的。
     """
+    if fp16 == "auto":
+        try:
+            import torch
+            fp16 = "True" if torch.cuda.is_available() else "False"
+        except Exception:  # noqa: BLE001
+            fp16 = "False"
     wd = os.path.join(work, sid)
     os.makedirs(wd, exist_ok=True)
     log("start", f"{sid} ← {source or '(无原唱)'} | inst={bool(inst_src)} acap={bool(acap_src)}")
@@ -292,7 +299,7 @@ def run_one(source: str, sid: str, title: str, ref: str, work: str, seconds: flo
         vc = cached_vc
         log("vc", "复用已有换声结果（--reuse）")
     else:
-        vc = vc_seedvc(vocals, ref, wd, seg=seg, steps=steps)
+        vc = vc_seedvc(vocals, ref, wd, seg=seg, steps=steps, fp16=fp16, semi=semi)
     cover, plain, loud = mix(vc, inst, wd)
     acap = export_acapella(vc, wd)
     info = probe(cover)
@@ -328,6 +335,7 @@ def main() -> None:
     ap.add_argument("--ref", default="", help="参考音色音频；缺省从 R2 assets/ref/cover_voice.mp3 取")
     ap.add_argument("--work", default=os.environ.get("WORK", "/tmp/coverwork"))
     ap.add_argument("--seconds", type=float, default=0, help="只处理前 N 秒（冒烟用）")
+    ap.add_argument("--semi", type=int, default=0, help="人声移调半音数（伴奏降调时用 -1）")
     ap.add_argument("--steps", type=int, default=25)
     ap.add_argument("--seg", type=float, default=24.0, help="换声分段长度（秒）")
     ap.add_argument("--no-upload", action="store_true")
@@ -353,7 +361,7 @@ def main() -> None:
     title = a.title or os.path.splitext(os.path.basename((a.source or a.acap).replace("r2:", "")))[0]
 
     res = run_one(a.source, sid, title, ref, a.work, a.seconds, a.steps, a.seg, a.no_upload,
-                  reuse=a.reuse, inst_src=a.inst, acap_src=a.acap)
+                  reuse=a.reuse, inst_src=a.inst, acap_src=a.acap, semi=a.semi)
     print("RESULT " + str(res), flush=True)
 
 
