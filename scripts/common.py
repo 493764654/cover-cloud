@@ -22,6 +22,28 @@ MANIFEST_KEY = "manifest.json"
 
 def log(stage: str, msg: str) -> None:
     print(f"[{time.time() - T0:7.1f}s] {stage:<10} {msg}", flush=True)
+    _report(stage, msg)
+
+
+_last_push = [0.0]
+
+
+def _report(stage: str, msg: str) -> None:
+    """把进度写到 R2（R2_STATUS_KEY），用于远端实时观察长任务卡在哪一步。"""
+    key = os.environ.get("R2_STATUS_KEY")
+    if not key:
+        return
+    now = time.time()
+    if now - _last_push[0] < 3:
+        return
+    _last_push[0] = now
+    try:
+        s3, bucket = r2()
+        body = json.dumps({"t": round(now - T0, 1), "stage": stage, "msg": str(msg)[:400],
+                           "at": time.strftime("%H:%M:%S")}, ensure_ascii=False).encode("utf-8")
+        s3.put_object(Bucket=bucket, Key=key, Body=body, ContentType="application/json")
+    except Exception:  # noqa: BLE001
+        pass
 
 
 def ff(*args: str) -> None:

@@ -64,6 +64,7 @@ jobs:
       TORCH_NUM_THREADS: 2
       YT_COOKIES_FILE: ${{ github.workspace }}/yt_cookies.txt
       WORK: ${{ github.workspace }}/work
+      R2_STATUS_KEY: work/status.json
     steps:
       - uses: actions/checkout@v4
 
