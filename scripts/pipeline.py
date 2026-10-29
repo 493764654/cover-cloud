@@ -160,12 +160,28 @@ def vc_seedvc(vocals: str, ref: str, wd: str, seg: float = 24.0, overlap: float 
                "--auto-f0-adjust", "False", "--semi-tone-shift", "0",
                "--checkpoint", "ckpt/DiT_v2.pth", "--config", "configs/presets/config_local.yml",
                "--fp16", fp16]
-        p = subprocess.run(cmd, cwd=SEEDVC, capture_output=True, text=True,
-                           encoding="utf-8", errors="replace",
-                           env={**os.environ, "PYTHONIOENCODING": "utf-8",
-                                "OMP_NUM_THREADS": os.environ.get("OMP_NUM_THREADS", "4")})
-        if p.returncode != 0:
-            raise RuntimeError(f"段 {i} 推理失败:\n" + (p.stderr or p.stdout or "")[-1500:])
+        log("vc", f"seg{i:02d} 开始 {pos:.1f}..{pos + dur:.1f}s steps={steps}")
+        import common as _c
+        proc = subprocess.Popen(cmd, cwd=SEEDVC, stdout=subprocess.PIPE,
+                                stderr=subprocess.STDOUT, text=True, bufsize=1,
+                                encoding="utf-8", errors="replace",
+                                env={**os.environ, "PYTHONIOENCODING": "utf-8",
+                                     "OMP_NUM_THREADS": os.environ.get("OMP_NUM_THREADS", "4")})
+        tail: list[str] = []
+        nline = 0
+        for line in (proc.stdout or []):
+            line = line.rstrip("\n").strip()
+            if not line:
+                continue
+            tail.append(line)
+            if len(tail) > 40:
+                tail.pop(0)
+            nline += 1
+            if nline % 3 == 0:
+                _c._report("vc", f"seg{i:02d} {line[:200]}")
+        proc.wait()
+        if proc.returncode != 0:
+            raise RuntimeError(f"段 {i} 推理失败:\n" + "\n".join(tail)[-1500:])
         wavs = sorted(glob.glob(os.path.join(out, "*.wav")))
         if not wavs:
             raise RuntimeError(f"段 {i} 无输出")
