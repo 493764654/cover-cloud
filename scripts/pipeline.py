@@ -180,30 +180,37 @@ def vc_seedvc(vocals: str, ref: str, wd: str, seg: float = 24.0, overlap: float 
 
 # ------------------------------------------------------------------ 混音
 def mix(vc: str, instrumental: str, wd: str, no_loudnorm: bool = False):
-    """空气感 + 混音 → (混音 mp3, 空气感 mp3 或 None, LUFS)"""
+    """出两个真实不同的混音变体（插件随机播 = 有变化）：
+       cover.mp3      空气感版（明亮）
+       cover_plain.mp3 原始版（更稳、齿音少）
+    返回 (air_mp3, plain_mp3, LUFS)。"""
     air = os.path.join(wd, "air.wav")
     ff("-i", vc, "-af",
        "aexciter=amount=1.6:drive=7:freq=5000:blend=0,highshelf=f=7000:g=2:width_type=q:w=0.7",
        "-ar", "44100", air)
-    mixed = os.path.join(wd, "mixed.wav")
-    fc = ("[0:a]aformat=sample_fmts=fltp:sample_rates=44100:channel_layouts=stereo,volume=2dB[v];"
-          "[1:a]aformat=sample_fmts=fltp:sample_rates=44100:channel_layouts=stereo[i];"
-          "[i][v]amix=inputs=2:duration=longest:dropout_transition=0:normalize=0,"
-          "volume=-2dB,alimiter=limit=0.94[m]")
-    ff("-i", air, "-i", instrumental, "-filter_complex", fc, "-map", "[m]",
-       "-ar", "44100", "-ac", "2", "-c:a", "pcm_s16le", mixed)
 
+    def _mix(voc: str, tag: str) -> str:
+        out = os.path.join(wd, f"mixed_{tag}.wav")
+        fc = ("[0:a]aformat=sample_fmts=fltp:sample_rates=44100:channel_layouts=stereo,volume=2dB[v];"
+              "[1:a]aformat=sample_fmts=fltp:sample_rates=44100:channel_layouts=stereo[i];"
+              "[i][v]amix=inputs=2:duration=longest:dropout_transition=0:normalize=0,"
+              "volume=-2dB,alimiter=limit=0.94[m]")
+        ff("-i", voc, "-i", instrumental, "-filter_complex", fc, "-map", "[m]",
+           "-ar", "44100", "-ac", "2", "-c:a", "pcm_s16le", out)
+        return out
+
+    wet, dry = _mix(air, "air"), _mix(vc, "plain")
     cover = os.path.join(wd, "cover.mp3")
-    air_mp3 = os.path.join(wd, "cover_air.mp3")
+    plain = os.path.join(wd, "cover_plain.mp3")
     if no_loudnorm:
-        ff("-i", mixed, "-c:a", "libmp3lame", "-b:a", "320k", "-ar", "44100", "-ac", "2",
-           "-write_xing", "1", "-id3v2_version", "3", cover)
-        shutil.copyfile(cover, air_mp3)
-        return cover, air_mp3, measure_loudness(cover)
-    log("mix", f"mix LUFS {measure_loudness(mixed)}")
-    loud = loudnorm_two_pass(mixed, cover, I=-14.0)
-    shutil.copyfile(cover, air_mp3)     # 空气感已并入混音链，主版本即带空气感
-    return cover, air_mp3, loud
+        for src, dst in ((wet, cover), (dry, plain)):
+            ff("-i", src, "-c:a", "libmp3lame", "-b:a", "320k", "-ar", "44100", "-ac", "2",
+               "-write_xing", "1", "-id3v2_version", "3", dst)
+        return cover, plain, measure_loudness(cover)
+    log("mix", f"wet LUFS {measure_loudness(wet)} / dry LUFS {measure_loudness(dry)}")
+    loud = loudnorm_two_pass(wet, cover, I=-14.0)
+    loudnorm_two_pass(dry, plain, I=-14.0)
+    return cover, plain, loud
 
 
 def export_acapella(vc: str, wd: str) -> str:
@@ -227,28 +234,35 @@ def run_one(source: str, sid: str, title: str, ref: str, work: str, seconds: flo
     else:
         src = fetch_source(source, wd)
         vocals, inst = separate(src, wd, seconds=seconds)
-    vc = vc_seedvc(vocals, ref, wd, seg=seg, steps=steps)
-    cover, air, loud = mix(vc, inst, wd)
+
+    cached_vc = os.path.join(wd, "vc", "vc_full.wav")
+    if reuse and os.path.exists(cached_vc):
+        vc = cached_vc
+        log("vc", "复用已有换声结果（--reuse）")
+    else:
+        vc = vc_seedvc(vocals, ref, wd, seg=seg, steps=steps)
+    cover, plain, loud = mix(vc, inst, wd)
     acap = export_acapella(vc, wd)
     info = probe(cover)
 
     result = {"sid": sid, "title": title, "duration": info["duration"],
-              "loudness": loud, "cover": cover, "air": air, "acapella": acap, "uploaded": False}
+              "loudness": loud, "cover": cover, "plain": plain, "acapella": acap, "uploaded": False}
     if no_upload:
         log("done", f"{sid} (no-upload) {cover}")
         return result
 
     base = os.environ.get("R2_PUBLIC_BASE", "").rstrip("/")
-    keys = {suf: f"songs/{sid}/{sid}_{suf}" for suf in ("cover", "cover_air", "acapella")}
-    r2_put(cover, keys["cover"] + ".mp3")
-    r2_put(air, keys["cover_air"] + ".mp3")
-    r2_put(acap, keys["acapella"] + ".mp3")
-    urls = [f"{base}/{keys[k]}.mp3" if base else "" for k in ("cover", "cover_air")]
-    acap_url = f"{base}/{keys['acapella']}.mp3" if base else None
-    upsert_manifest(sid, title, [u for u in urls if u] or urls, acap_url, info, loud,
-                    keys["cover"] + ".mp3")
+    keys = {"cover": f"songs/{sid}/{sid}_cover.mp3",
+            "plain": f"songs/{sid}/{sid}_cover_plain.mp3",
+            "acapella": f"songs/{sid}/{sid}_acapella.mp3"}
+    r2_put(cover, keys["cover"])
+    r2_put(plain, keys["plain"])
+    r2_put(acap, keys["acapella"])
+    urls = [f"{base}/{keys[k]}" if base else "" for k in ("cover", "plain")]
+    acap_url = f"{base}/{keys['acapella']}" if base else None
+    upsert_manifest(sid, title, [u for u in urls if u] or urls, acap_url, info, loud, keys["cover"])
     result["uploaded"] = True
-    log("done", f"{sid} -> {base}/{keys['cover']}.mp3")
+    log("done", f"{sid} -> {base}/{keys['cover']}")
     return result
 
 

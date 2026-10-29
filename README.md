@@ -15,7 +15,7 @@
 | 单首耗时 | 4 分钟歌 ≈ **20–45 分钟**（demucs CPU 5–8 min + Seed-VC 24 s 分段 15–35 min） |
 | 单次 job 上限 | 6 小时；本工作流设 350 分钟，安全 |
 | 并发 | 一个 job 串行跑多首（模型只加载一次）；月额度要并行就开第二个 workflow |
-| 产物 | `songs/<sid>/<sid>_cover.mp3`、`_cover_air.mp3`、`_acapella.mp3` + 根 `manifest.json` |
+| 产物 | `songs/<sid>/<sid>_cover.mp3`、`_cover_plain.mp3`、`_acapella.mp3` + 根 `manifest.json` |
 
 > 首批前先跑一次 `seconds=20` 冒烟，确认 20 秒能出成品再挂整曲。
 
@@ -135,13 +135,13 @@ gh run watch -R 493764654/cover-cloud
     "acapella": "https://pub-.../songs/s010/s010_acapella.mp3",
     "normal": [
       "https://pub-.../songs/s010/s010_cover.mp3",
-      "https://pub-.../songs/s010/s010_cover_air.mp3"
+      "https://pub-.../songs/s010/s010_cover_plain.mp3"
     ]
   }
 }
 ```
 
-插件侧：说「清唱」播 `variants.acapella`，否则从 `variants.normal` 随机一条；老解析器只读 `url` 也能用（向后兼容）。
+插件侧：说「清唱」播 `variants.acapella`，否则从 `variants.normal` 随机一条（`_cover`=空气感明亮版，`_cover_plain`=原始版，两条真实不同母带）；老解析器只读 `url` 也能用（向后兼容）。
 
 ---
 
