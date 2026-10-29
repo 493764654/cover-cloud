@@ -83,7 +83,13 @@ def separate(src: str, wd: str, seconds: float = 0, demucs_seg: float = 7) -> tu
     src44 = to_wav(src, os.path.join(wd, "src44.wav"), seconds)
 
     dev = "cuda" if torch.cuda.is_available() else "cpu"
+    try:
+        torch.set_num_threads(int(os.environ.get("TORCH_NUM_THREADS") or (os.cpu_count() or 2)))
+    except Exception:  # noqa: BLE001
+        pass
+    log("separate", f"cpu={os.cpu_count()} threads={torch.get_num_threads()} 加载 demucs 模型…")
     model = get_model("htdemucs")
+    log("separate", "模型就绪，开始推理…")
     model.to(dev).eval()
     wav, sr = torchaudio.load(src44)
     if sr != model.samplerate:

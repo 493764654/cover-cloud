@@ -103,6 +103,12 @@ jobs:
           tar -xJf /tmp/ckpt.tar.xz -C vendor/seedvc
           du -sh vendor/seedvc/ckpt && ls vendor/seedvc/ckpt
 
+      - name: 预热 demucs 模型（首次下载 ~80MB）
+        if: inputs.mode == 'cover'
+        continue-on-error: true
+        run: |
+          python -c "from demucs.pretrained import get_model; m=get_model('htdemucs'); print('demucs ok', m.sources)"
+
       - name: 写入 YouTube cookies（可选，配了 secret 才生效）
         if: env.YT_COOKIES_B64 != ''
         env:
