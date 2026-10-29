@@ -36,7 +36,9 @@ def main() -> None:
     os.makedirs(a.out_dir, exist_ok=True)
     name = slug(a.name) if a.name else ""
     tmpl = os.path.join(a.out_dir, (name or "dl") + ".%(ext)s")
-    cmd = [sys.executable, "-m", "yt_dlp", "-x", "--audio-format", "wav",
+    cookies = os.environ.get("YT_COOKIES_FILE", "")
+    extra = ["--cookies", cookies] if cookies and os.path.exists(cookies) else []
+    cmd = [sys.executable, "-m", "yt_dlp", *extra, "-x", "--audio-format", "wav",
            "--audio-quality", "0", "--no-playlist",
            "--extractor-args", "youtubepot-bgutilhttp:base_url=http://127.0.0.1:4416",
            "--extractor-args", "youtube:player_client=web,default",

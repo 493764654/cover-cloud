@@ -47,7 +47,9 @@ def fetch_source(src: str, wd: str, tag: str = "src") -> str:
     if src.startswith("url:"):
         url = src[4:]
         out = os.path.join(wd, tag + "_raw.%(ext)s")
-        cmd = [sys.executable, "-m", "yt_dlp", "-x", "--audio-format", "wav",
+        ck = os.environ.get("YT_COOKIES_FILE", "")
+        extra = ["--cookies", ck] if ck and os.path.exists(ck) else []
+        cmd = [sys.executable, "-m", "yt_dlp", *extra, "-x", "--audio-format", "wav",
                "--audio-quality", "0", "--no-playlist", "-o", out, url]
         log("download", f"[{tag}] {url}")
         p = subprocess.run(cmd, capture_output=True, text=True,

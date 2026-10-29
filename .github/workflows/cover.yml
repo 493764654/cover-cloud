@@ -60,6 +60,7 @@ jobs:
       R2_CKPT_KEY: ${{ secrets.R2_CKPT_KEY || 'models/seedvc/seedvc_ckpt.tar.xz' }}
       HF_ENDPOINT: https://huggingface.co
       OMP_NUM_THREADS: 4
+      YT_COOKIES_FILE: ${{ github.workspace }}/yt_cookies.txt
       WORK: ${{ github.workspace }}/work
     steps:
       - uses: actions/checkout@v4
@@ -98,6 +99,14 @@ jobs:
           mkdir -p vendor/seedvc/ckpt
           tar -xJf /tmp/ckpt.tar.xz -C vendor/seedvc
           du -sh vendor/seedvc/ckpt && ls vendor/seedvc/ckpt
+
+      - name: 写入 YouTube cookies（可选，配了 secret 才生效）
+        if: env.YT_COOKIES_B64 != ''
+        env:
+          YT_COOKIES_B64: ${{ secrets.YT_COOKIES_B64 }}
+        run: |
+          echo "$YT_COOKIES_B64" | base64 -d > "$HOME/yt_cookies.txt"
+          wc -l "$HOME/yt_cookies.txt"
 
       - name: 启动 YouTube PO token provider（绕 bot 校验）
         run: |
