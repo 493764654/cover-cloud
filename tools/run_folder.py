@@ -13,6 +13,7 @@
   python run_folder.py --cloud        # 造 plan.json 并触发 GitHub workflow
 """
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -74,12 +75,16 @@ def main():
     ap.add_argument("--steps", type=int, default=25)
     ap.add_argument("--seg", type=float, default=24)
     ap.add_argument("--sec", type=float, default=0, help="调试用：只跑前 N 秒")
+    ap.add_argument("--only", default="", help="只跑歌名包含该字串的（其余跳过）")
+    ap.add_argument("--ref", default="", help="参考音色文件；空则用 R2 上的 assets/ref/cover_voice.mp3")
     ap.add_argument("--semi", type=int, default=0, help="人声移调半音（伴奏降1写 -1）")
     a = ap.parse_args()
 
     songs, skipped = scan()
     print(f"目录：{ROOT}")
     ready = {k: v for k, v in songs.items() if "vocal" in v}
+    if a.only:
+        ready = {k: v for k, v in ready.items() if a.only in k}
     for k, v in ready.items():
         print(f"[跑] {k}: " + " + ".join(sorted(v)))
     for k, v in songs.items():
@@ -93,13 +98,15 @@ def main():
     if a.dry_run:
         return
 
-    work = r"C:\Users\Administrator\Downloads\cover_out"
+    work = os.path.join(r"C:\Users\Administrator\Downloads\cover_out", a.channel)
     ok = 0
     for i, (title, v) in enumerate(ready.items()):
-        sid = f"f{i+1:03d}"
+        sid = "s" + hashlib.md5(title.encode("utf-8")).hexdigest()[:6]
         cmd = [PY, PIPE, "--source", v["vocal"], "--sid", sid, "--title", title,
                "--work", work, "--sec", str(a.sec), "--steps", str(a.steps),
-               "--seg", str(a.seg)]
+               "--seg", str(a.seg), "--channel", a.channel]
+        if a.ref:
+            cmd += ["--ref", a.ref]
         if a.semi:
             cmd += ["--semi", str(a.semi)]
         if "inst" in v:

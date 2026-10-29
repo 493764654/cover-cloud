@@ -22,6 +22,7 @@ import glob
 import os
 import shutil
 import subprocess
+import time
 import sys
 import wave
 
@@ -257,7 +258,7 @@ def export_acapella(vc: str, wd: str) -> str:
 def run_one(source: str, sid: str, title: str, ref: str, work: str, seconds: float,
             steps: int, seg: float, no_upload: bool, reuse: bool = False,
             inst_src: str = "", acap_src: str = "", fp16: str = "auto",
-            semi: int = 0) -> dict:
+            semi: int = 0, channel: str = "") -> dict:
     """source=原唱(含人声) / inst_src=纯伴奏 / acap_src=纯人声清唱，后两者可空。
 
     优先级：清唱 > 原唱分离；伴奏：给的优先，否则用分离出来的。
@@ -304,8 +305,27 @@ def run_one(source: str, sid: str, title: str, ref: str, work: str, seconds: flo
     acap = export_acapella(vc, wd)
     info = probe(cover)
 
-    result = {"sid": sid, "title": title, "duration": info["duration"],
+    channel = channel or os.environ.get("CHANNEL", "local")
+    result = {"sid": sid, "title": title, "duration": info["duration"], "channel": channel,
               "loudness": loud, "cover": cover, "plain": plain, "acapella": acap, "uploaded": False}
+    try:
+        import json as _json
+        import platform
+        _meta = {
+            "channel": channel, "sid": sid, "title": title,
+            "source": os.path.basename(str(source).replace("r2:", "")),
+            "inst": os.path.basename(str(inst_src)) if inst_src else "(ai-separated)",
+            "acap": os.path.basename(str(acap_src)) if acap_src else "",
+            "ref": os.path.basename(str(ref)), "semi": semi, "steps": steps, "seg": seg,
+            "duration": info["duration"], "loudness": loud,
+            "host": platform.node(), "fp16": fp16,
+            "finished_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+        }
+        with open(os.path.join(wd, "_info.json"), "w", encoding="utf-8") as _f:
+            _json.dump(_meta, _f, ensure_ascii=False, indent=1)
+        log("info", f"通道={channel} -> {os.path.join(wd, '_info.json')}")
+    except Exception as _e:  # noqa: BLE001
+        log("info", f"写 _info.json 失败 {_e}")
     if no_upload:
         log("done", f"{sid} (no-upload) {cover}")
         return result
@@ -335,6 +355,7 @@ def main() -> None:
     ap.add_argument("--ref", default="", help="参考音色音频；缺省从 R2 assets/ref/cover_voice.mp3 取")
     ap.add_argument("--work", default=os.environ.get("WORK", "/tmp/coverwork"))
     ap.add_argument("--seconds", type=float, default=0, help="只处理前 N 秒（冒烟用）")
+    ap.add_argument("--channel", default="", help="通道标记：local / github / aistudio")
     ap.add_argument("--semi", type=int, default=0, help="人声移调半音数（伴奏降调时用 -1）")
     ap.add_argument("--steps", type=int, default=25)
     ap.add_argument("--seg", type=float, default=24.0, help="换声分段长度（秒）")
@@ -361,7 +382,8 @@ def main() -> None:
     title = a.title or os.path.splitext(os.path.basename((a.source or a.acap).replace("r2:", "")))[0]
 
     res = run_one(a.source, sid, title, ref, a.work, a.seconds, a.steps, a.seg, a.no_upload,
-                  reuse=a.reuse, inst_src=a.inst, acap_src=a.acap, semi=a.semi)
+                  reuse=a.reuse, inst_src=a.inst, acap_src=a.acap, semi=a.semi,
+                  channel=a.channel)
     print("RESULT " + str(res), flush=True)
 
 
