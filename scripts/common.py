@@ -26,7 +26,7 @@ def log(stage: str, msg: str) -> None:
 def ff(*args: str) -> None:
     """ffmpeg 静默执行，失败抛异常。"""
     cmd = ["ffmpeg", "-hide_banner", "-loglevel", "error", "-y", *args]
-    p = subprocess.run(cmd, capture_output=True, text=True)
+    p = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace")
     if p.returncode != 0:
         raise RuntimeError("ffmpeg 失败: " + " ".join(args)[:200] + "\n" + (p.stderr or "")[-1500:])
 

@@ -144,6 +144,7 @@ def vc_seedvc(vocals: str, ref: str, wd: str, seg: float = 24.0, overlap: float 
                "--checkpoint", "ckpt/DiT_v2.pth", "--config", "configs/presets/config_local.yml",
                "--fp16", fp16]
         p = subprocess.run(cmd, cwd=SEEDVC, capture_output=True, text=True,
+                           encoding="utf-8", errors="replace",
                            env={**os.environ, "PYTHONIOENCODING": "utf-8",
                                 "OMP_NUM_THREADS": os.environ.get("OMP_NUM_THREADS", "4")})
         if p.returncode != 0:
@@ -214,13 +215,18 @@ def export_acapella(vc: str, wd: str) -> str:
 
 # ------------------------------------------------------------------ 主流程
 def run_one(source: str, sid: str, title: str, ref: str, work: str, seconds: float,
-            steps: int, seg: float, no_upload: bool) -> dict:
+            steps: int, seg: float, no_upload: bool, reuse: bool = False) -> dict:
     wd = os.path.join(work, sid)
     os.makedirs(wd, exist_ok=True)
     log("start", f"{sid} ← {source[:90]}")
 
-    src = fetch_source(source, wd)
-    vocals, inst = separate(src, wd, seconds=seconds)
+    vp, ip = os.path.join(wd, "vocals.wav"), os.path.join(wd, "instrumental.wav")
+    if reuse and os.path.exists(vp) and os.path.exists(ip):
+        vocals, inst = vp, ip
+        log("separate", "复用已有 stems（--reuse）")
+    else:
+        src = fetch_source(source, wd)
+        vocals, inst = separate(src, wd, seconds=seconds)
     vc = vc_seedvc(vocals, ref, wd, seg=seg, steps=steps)
     cover, air, loud = mix(vc, inst, wd)
     acap = export_acapella(vc, wd)
@@ -257,6 +263,7 @@ def main() -> None:
     ap.add_argument("--steps", type=int, default=25)
     ap.add_argument("--seg", type=float, default=24.0, help="换声分段长度（秒）")
     ap.add_argument("--no-upload", action="store_true")
+    ap.add_argument("--reuse", action="store_true", help="复用 work/<sid>/ 下已有 vocals/instrumental")
     ap.add_argument("--list-inbox", action="store_true", help="列出 R2 inbox/ 下的音频后退出")
     a = ap.parse_args()
 
@@ -277,7 +284,8 @@ def main() -> None:
         sid = next_id(load_manifest().get("songs", []))
     title = a.title or os.path.splitext(os.path.basename(a.source.replace("r2:", "")))[0]
 
-    res = run_one(a.source, sid, title, ref, a.work, a.seconds, a.steps, a.seg, a.no_upload)
+    res = run_one(a.source, sid, title, ref, a.work, a.seconds, a.steps, a.seg, a.no_upload,
+                  reuse=a.reuse)
     print("RESULT " + str(res), flush=True)
 
 

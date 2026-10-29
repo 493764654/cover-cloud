@@ -10,3 +10,4 @@ work/
 __pycache__/
 *.pyc
 .env
+vendor/seedvc/campplus_cn_common.bin

@@ -80,6 +80,7 @@ jobs:
           python -c "import torch, demucs; print('torch', torch.__version__, 'cuda', torch.cuda.is_available())"
 
       - name: 恢复 Seed-VC 权重缓存
+        if: inputs.mode == 'cover'
         id: ckptcache
         uses: actions/cache@v4
         with:
@@ -87,7 +88,7 @@ jobs:
           key: seedvc-ckpt-v1
 
       - name: 从 R2 拉 Seed-VC 权重（约 2.4GB，仅首次）
-        if: steps.ckptcache.outputs.cache-hit != 'true'
+        if: inputs.mode == 'cover' && steps.ckptcache.outputs.cache-hit != 'true'
         run: |
           python -c "import sys;sys.path.insert(0,'scripts');from common import r2_get;r2_get(__import__('os').environ['R2_CKPT_KEY'],'/tmp/ckpt.tar.xz')"
           mkdir -p vendor/seedvc/ckpt
