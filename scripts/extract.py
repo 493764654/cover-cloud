@@ -37,11 +37,18 @@ def main() -> None:
     name = slug(a.name) if a.name else ""
     tmpl = os.path.join(a.out_dir, (name or "dl") + ".%(ext)s")
     cmd = [sys.executable, "-m", "yt_dlp", "-x", "--audio-format", "wav",
-           "--audio-quality", "0", "--no-playlist", "-o", tmpl, a.url]
+           "--audio-quality", "0", "--no-playlist",
+           "--extractor-args", "youtubepot-bgutilhttp:base_url=http://127.0.0.1:4416",
+           "--extractor-args", "youtube:player_client=web,default",
+           "-o", tmpl, a.url]
     log("download", a.url)
-    p = subprocess.run(cmd, capture_output=True, text=True)
+    p = subprocess.run(cmd, capture_output=True, text=True,
+                       encoding="utf-8", errors="replace")
     if p.returncode != 0:
-        raise SystemExit("yt-dlp 失败:\n" + (p.stderr or p.stdout or "")[-1500:])
+        diag = [l for l in (p.stdout or "").splitlines()
+                if re.search(r"plugin|pot|bgutil|PO Token|client|Extractor", l, re.I)][:25]
+        raise SystemExit("yt-dlp 失败:\n" + "\n".join(diag) + "\n---\n"
+                         + (p.stderr or p.stdout or "")[-1200:])
 
     hits = sorted(glob.glob(os.path.join(a.out_dir, (name or "dl") + ".wav")))
     if not hits:

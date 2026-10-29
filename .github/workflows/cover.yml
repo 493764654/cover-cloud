@@ -13,6 +13,10 @@ on:
         default: cover
         type: choice
         options: [cover, extract]
+      plan:
+        description: "cover 批量计划 JSON（素材清单自动生成，一般不用手填）"
+        required: false
+        default: ""
       targets:
         description: "cover: R2 inbox 文件名(逗号分隔) 或 all 或视频URL；extract: 视频URL(逗号分隔)"
         required: true
@@ -126,9 +130,17 @@ jobs:
 
       - name: cover 模式（翻唱 → R2）
         if: inputs.mode == 'cover'
+        env:
+          PLAN: ${{ inputs.plan }}
         run: |
           set -uo pipefail
           mkdir -p work
+          if [ -n "${PLAN:-}" ]; then
+            python -c "import os,io;io.open('work/plan.json','w',encoding='utf-8').write(os.environ['PLAN'])"
+            echo "plan 条数: $(python -c "import json;print(len(json.load(open('work/plan.json',encoding='utf-8'))))")"
+            python scripts/run_plan.py --plan work/plan.json               --seconds "${{ inputs.seconds }}" --steps "${{ inputs.steps }}" --seg "${{ inputs.seg }}"
+            exit $?
+          fi
           RAW="${{ inputs.targets }}"
           if [ "$RAW" = "all" ]; then
             python -c "import sys;sys.path.insert(0,'scripts');from common import r2_list;print('\n'.join(k for k in r2_list('inbox/') if k.lower().endswith(('.mp3','.wav','.flac','.m4a'))))" > work/list.txt
